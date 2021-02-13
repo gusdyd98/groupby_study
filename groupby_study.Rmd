@@ -1,0 +1,183 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+#데이터의 가치를 손실없이 분석 단위 변경하여 사용하는 데이터 전처리!!!
+   : 데이터 집약이다.
+   : groupby 나 window 함수의 집약 함수를 사용한다.
+   
+가장 기본적인 집약 : count 집계
+
+#hotel_id별 갯수
+```{r}
+library(dplyr)
+source('preprocess/load_data/data_loader.R')
+load_hotel_reserve()
+
+# 아래 부터 책에 게재
+reserve_tb %>%
+
+  # group_by 함수로 집약 단위를 hotel_id로 지정
+  group_by(hotel_id) %>%
+
+  # summarise 함수를 사용하여 집약 처리를 지정
+  # n 함수를 사용하여 예약 수를 카운트
+  # n_distinct 함수에 customer_id를 지정하여 customer_id의 유니크 카운트 세기 
+  summarise(rsv_cnt=n(),
+            cus_cnt=n_distinct(customer_id))
+  #summarise()
+hotel_tb
+
+```
+
+#hotel_id별 합계
+```{r}
+reserve_tb %>%
+  group_by(hotel_id, people_num) %>%
+  summarise(ho_id_price_sum=sum(total_price))
+```
+
+
+#hotel_id별 평균, 최소값, 최대값, 대푯값 (중앙값, 1사분위(25%), 20%분위)
+```{r}
+
+reserve_tb %>%
+  group_by(hotel_id) %>%
+
+  # quantile 함수에 total_price와 대상 값을 지정하여 20% 백분위 값을 산출
+  summarise(price_max=max(total_price),
+            price_min=min(total_price),
+            price_avg=mean(total_price),
+            price_median=median(total_price),
+            price_20per=quantile(total_price, 0.20),
+            price_25per=quantile(total_price, 0.25))
+```
+
+#hotel_id별 분산과 표준편차 확인하기
+```{r}
+reserve_tb %>%
+  group_by(hotel_id) %>%
+  summarise(h_var=coalesce(var(total_price),0), 
+            h_std=coalesce(sd(total_price), 0))
+
+reserve_tb
+```
+
+#최빈값 구하기 : 범주형 구분하기
+```{r}
+names(which.max(table(round(reserve_tb$total_price, -3))))
+
+```
+
+#순위 구하기 / 시간 데이터
+```{r}
+reserve_tb$reserve_datetime <-
+  as.POSIXct(reserve_tb$reserve_datetime, format='%Y-%m-%d %H:%M:%S')
+
+reserve_tb %>%
+
+  # group_by 함수를 사용하여 집약 단위를 지정
+  group_by(customer_id) %>%
+
+  # mutate 함수로 log_no라는 열을 새롭게 추가
+  # row_number 함수로 예약 시간을 기준으로 순위를 계산
+  mutate(log_no=row_number(reserve_datetime))
+```
+
+#hotel_id별 예약 건수 구하고, hotel_id별 예약 건수의 rank 구하기
+```{r}
+reserve_tb %>%
+  group_by(hotel_id) %>%
+  summarise(res_cnt = n()) %>%
+  mutate(rsv_rank=min_rank(desc(res_cnt)))
+
+
+reserve_tb %>%
+  group_by(hotel_id) %>%
+  summarise(res_cnt = n()) %>%
+  transmute(hotel_id, rsv_rank=min_rank(desc(res_cnt)))
+```
+
+#hotel_id별 예약 건수 구하고, hotel_id별 예약 건수의 rank 구해서 결합하기
+```{r}
+
+reserve_tb -> reserve_tb_all
+left_join(reserve_tb_all, reserve_tb %>%
+  group_by(hotel_id) %>%
+  summarise(res_cnt = n()) %>%
+  mutate(rsv_rank=min_rank(desc(res_cnt))), by = c("hotel_id") )
+
+reserve_tb_all
+```
+
+#join 사용하기 (두개의 테이블에서 hotel_id로 결합)
+```{r}
+inner_join(reserve_tb %>% filter(people_num == 1), 
+           hotel_tb %>% filter(is_business),
+           by='hotel_id')
+```
+
+#마스터 테이블 변경해서 결합하기 (잘모르겠음)
+```{r}
+
+# 아래 부터 책에 게재
+# small_area_name 별로 호텔 수를 계산, 결합 키를 판정하기 위한 테이블
+small_area_mst <-
+  hotel_tb %>%
+    group_by(big_area_name, small_area_name) %>%
+
+    # -1로 자신을 제외
+    summarise(hotel_cnt=n() - 1) %>%
+  
+    # 집약 처리 후에 그룹화를 해제
+    ungroup() %>%
+  
+
+    # 20건 이상이면 join_area_id에 small_area_name을 지정
+    # 20건 미만이면 join_area_id에 big_area_name을 지정
+    mutate(join_area_id=
+             if_else(hotel_cnt >= 20, small_area_name, big_area_name)) %>%
+    select(small_area_name, join_area_id)
+
+str(small_area_mst)
+
+# 추천 대상 호텔에 small_area_mst를 결합하여 join_area_id를 설정
+base_hotel_mst <-
+  inner_join(hotel_tb, small_area_mst, by='small_area_name') %>%
+    select(hotel_id, join_area_id)
+
+str(base_hotel_mst )
+
+# 필요에 따라 메모리 해제(필수는 아니지만 메모리에 여유가 없을 때 이용)
+rm(small_area_mst)
+
+# recommend_hotel_mst는 추천 후보 테이블 
+recommend_hotel_mst <-
+  bind_rows(
+    # join_area_id를 big_area_name으로한 추천 후보 마스터 
+    hotel_tb %>%
+      rename(rec_hotel_id=hotel_id, join_area_id=big_area_name) %>%
+      select(join_area_id, rec_hotel_id),
+
+    # join_area_id를 small_area_name으로한 추천 후보 마스터
+    hotel_tb %>%
+      rename(rec_hotel_id=hotel_id, join_area_id=small_area_name) %>%
+      select(join_area_id, rec_hotel_id)
+  )
+
+# base_hotel_mst와 recommend_hotel_mst를 결합하여 추천 후보 정보를 부여
+inner_join(base_hotel_mst, recommend_hotel_mst, by='join_area_id') %>%
+
+  # 추천 후보에서 자신을 제외
+  filter(hotel_id != rec_hotel_id) %>%
+  select(hotel_id, rec_hotel_id)
+```
+
+
+
+#과거 데이터 사용하기
+```{r}
+
+```
+
