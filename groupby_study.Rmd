@@ -181,3 +181,49 @@ inner_join(base_hotel_mst, recommend_hotel_mst, by='join_area_id') %>%
 
 ```
 
+
+#---------------------------------------------------------------
+#데이터 원하는 컬럼 선택 --> 평균 또는 대푯값으로 집약하기
+#group_by 
+#select
+#집약 (mutate or summarise)
+#  +mutate : 컬럼을 유지한채 집약한 계산값을 추가한다.
+#  +summarise : 중복 제거된 컬럼에 집약한 계산값을 추가한다.
+#---------------------------------------------------------------
+#---------------------------------------------------------------
+```{r}
+library(dplyr)
+library(reshape2)
+
+head(mtcars)
+
+mtcars
+
+mtcars %>%
+  group_by(vs, am) %>%
+  select(vs, am, wt) %>%
+  mutate(mean_v=mean(wt)
+         ,median_v=median(wt)
+         ,std=sd(wt)
+         ,iqr_v=IQR(wt))
+
+```
+
+```{r}
+mtcars %>%
+  group_by(vs, am) %>%
+  select(vs, am, wt) %>%
+  summarise(mean_ammean_v=mean(wt)
+         ,median_v=median(wt)
+         ,std=sd(wt)
+         ,iqr_v=IQR(wt))
+
+```
+```{r}
+mtcars %>%
+  select(vs, am, wt) %>%
+  group_by(am, vs) %>%
+  summarise(mean_am=mean(wt))
+
+```
+
